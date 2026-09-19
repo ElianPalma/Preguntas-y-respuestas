@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feedback del proyecto</title>
+
+  <!-- Tipografías: Bricolage Grotesque (títulos y preguntas) + Instrument Sans (texto) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Instrument+Sans:wght@400..700&display=swap" rel="stylesheet">
+
+  <!-- Tailwind (si tu archivo base ya lo carga, deja solo una copia) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            paper: '#F7F8FA',
+            ink: '#14181F',
+            muted: '#5B6572',
+            line: '#D9DEE5',
+            graphite: '#3A4350',
+            cobalt: { DEFAULT: '#2F4BD8', dark: '#2439AE' },
+            cliente: { bg: '#EAF1FC', line: '#CBDBF4' },
+            agencia: { bg: '#EEF0F3', line: '#D5DAE1' }
+          },
+          fontFamily: {
+            display: ['"Bricolage Grotesque"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            sans: ['"Instrument Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Supabase JS v2 (si tu archivo base ya lo carga, deja solo una copia) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    button:focus-visible { outline: 2px solid #2F4BD8; outline-offset: 2px; }
+
+    /* Riel del hilo: un codo por cada respuesta, unido a la tarjeta de arriba */
+    .rail > .node { position: relative; }
+    .rail > .node::before {
+      content: '';
+      position: absolute;
+      left: -1.25rem;
+      top: -0.75rem;
+      width: 1.25rem;
+      height: calc(0.75rem + 1.4rem);
+      border-left: 2px solid #C3CAD5;
+      border-bottom: 2px solid #C3CAD5;
+      border-bottom-left-radius: 0.7rem;
+    }
+    .rail > .node:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      left: -1.25rem;
+      top: 1.3rem;
+      bottom: 0;
+      width: 2px;
+      background: #C3CAD5;
+    }
+
+    @keyframes pop {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: none; }
+    }
+    .pop { animation: pop .14s ease-out; }
+    @media (prefers-reduced-motion: reduce) {
+      .pop { animation: none; }
+    }
+  </style>
+</head>
+
+<body class="bg-paper font-sans text-ink antialiased">
+  <div class="mx-auto max-w-3xl px-4 py-10 sm:py-14">
+
+    <!-- Encabezado -->
+    <header class="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h1 class="font-display text-4xl font-bold tracking-tight sm:text-5xl">Feedback del proyecto</h1>
+        <p class="mt-3 max-w-md text-muted">Deja una pregunta en la sección que corresponda. Cliente y agencia responden en el mismo hilo.</p>
+      </div>
+
+      <div role="group" aria-label="Rol con el que escribes">
+        <p class="mb-1.5 text-sm text-muted">Escribes como</p>
+        <div class="inline-flex rounded-full border border-line bg-white p-1">
+          <button type="button" data-action="set-rol" data-rol="cliente" aria-pressed="true"
+                  class="rounded-full px-4 py-1.5 text-sm font-medium">Cliente</button>
+          <button type="button" data-action="set-rol" data-rol="agencia" aria-pressed="false"
+                  class="rounded-full px-4 py-1.5 text-sm font-medium">Agencia</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Formulario: nueva pregunta principal -->
+    <form id="new-question" class="mt-10 rounded-2xl border border-line bg-white p-5 sm:p-6">
+      <h2 class="font-display text-xl font-semibold">Nueva pregunta</h2>
+
+      <div class="mt-4 grid gap-4 sm:grid-cols-[12rem_1fr]">
+        <div>
+          <label for="seccion" class="block text-sm font-medium">Sección</label>
+          <input id="seccion" name="seccion" list="secciones" required autocomplete="off" placeholder="Diseño"
+                 class="mt-1.5 w-full rounded-lg border border-line bg-white px-3 py-2 placeholder:text-muted/70 focus:border-cobalt focus:outline-none focus:ring-2 focus:ring-cobalt/25">
+          <datalist id="secciones"></datalist>
+        </div>
+        <div>
+          <label for="texto" class="block text-sm font-medium">Tu pregunta</label>
+          <textarea id="texto" name="texto" rows="3" required placeholder="Escribe aquí tu pregunta o comentario"
+                    class="mt-1.5 w-full rounded-lg border border-line bg-white px-3 py-2 placeholder:text-muted/70 focus:border-cobalt focus:outline-none focus:ring-2 focus:ring-cobalt/25"></textarea>
+        </div>
+      </div>
+
+      <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <button type="submit"
+                class="rounded-lg bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark disabled:opacity-60">Publicar pregunta</button>
+        <p id="rol-hint" class="text-sm text-muted"></p>
+      </div>
+    </form>
+
+    <!-- Hilos -->
+    <div class="mt-12 flex items-baseline justify-between">
+      <div class="flex items-baseline gap-3">
+        <h2 class="font-display text-2xl font-semibold">Conversaciones</h2>
+        <span id="count" class="text-sm text-muted"></span>
+      </div>
+      <button type="button" data-action="reload" class="text-sm font-medium text-cobalt-dark hover:underline">Actualizar</button>
+    </div>
+
+    <div id="threads" class="mt-5 space-y-8">
+      <p class="text-muted">Cargando hilos…</p>
+    </div>
+  </div>
+
+  <!-- Aviso de estado -->
+  <div id="toast" role="status" aria-live="polite"
+       class="pointer-events-none fixed bottom-4 left-1/2 max-w-[90vw] -translate-x-1/2 rounded-lg bg-ink px-4 py-2.5 text-sm text-white opacity-0 transition-opacity"></div>
+
+  <script>
+  (() => {
+    'use strict';
+
+    /* ─────────────────────────────────────────────────────────────
+       CONEXIÓN A SUPABASE
+       Si tu index.html base ya crea el cliente, borra estas 3 líneas
+       y deja: const db = <el nombre de tu cliente>;
+       ───────────────────────────────────────────────────────────── */
+    const SUPABASE_URL = 'https://TU-PROYECTO.supabase.co';
+    const SUPABASE_KEY = 'TU_ANON_KEY';
+    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    /* ───────────── Configuración ───────────── */
+    const TABLE = 'preguntas';
+    const MAX_INDENT = 3;                       // niveles con sangría; los más profundos se aplanan
+    const DEFAULT_SECTIONS = ['Diseño', 'Desarrollo'];
+    const ROL_KEY = 'feedback_rol';
+
+    /* ───────────── Estado ───────────── */
+    const state = {
+      rows: [],
+      rol: 'cliente',
+      open: new Set(),        // ids con el formulario de respuesta abierto
+      drafts: new Map(),      // id → borrador de respuesta
+      justOpened: null
+    };
+
+    /* ───────────── Utilidades ───────────── */
+    const $ = (sel, root = document) => root.querySelector(sel);
+
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+
+    const rolLabel = (rol) => (rol === 'agencia' ? 'Agencia' : 'Cliente');
+
+    const rtf = new Intl.RelativeTimeFormat('es', { numeric: 'auto' });
+    function timeAgo(iso) {
+      const diff = (new Date(iso) - Date.now()) / 1000;
+      if (Math.abs(diff) < 60) return 'hace un momento';
+      const units = [['year', 31536000], ['month', 2592000], ['day', 86400], ['hour', 3600], ['minute', 60]];
+      for (const [unit, secs] of units) {
+        if (Math.abs(diff) >= secs) return rtf.format(Math.round(diff / secs), unit);
+      }
+      return 'hace un momento';
+    }
+    const fullDate = (iso) => new Date(iso).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' });
+
+    let toastTimer;
+    function toast(msg, kind = 'ok') {
+      const t = $('#toast');
+      t.textContent = msg;
+      t.classList.remove('opacity-0', 'bg-ink', 'bg-red-700');
+      t.classList.add('opacity-100', kind === 'error' ? 'bg-red-700' : 'bg-ink');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        t.classList.remove('opacity-100');
+        t.classList.add('opacity-0');
+      }, kind === 'error' ? 6000 : 2600);
+    }
+
+    function setBusy(btn, busy, label) {
+      if (!btn) return;
+      if (busy) {
+        btn.dataset.label = btn.textContent;
+        btn.textContent = label;
+        btn.disabled = true;
+      } else {
+        btn.textContent = btn.dataset.label || btn.textContent;
+        btn.disabled = false;
+      }
+    }
+
+    /* ───────────── Datos ───────────── */
+    // Convierte la lista plana en un árbol: raíces (parent_id null) → respuestas → respuestas…
+    function buildTree(rows) {
+      const nodes = new Map(rows.map((r) => [r.id, { ...r, children: [] }]));
+      const roots = [];
+      for (const n of nodes.values()) {
+        const parent = n.parent_id != null ? nodes.get(n.parent_id) : null;
+        if (parent) parent.children.push(n);
+        else roots.push(n);
+      }
+      const byDate = (a, b) => new Date(a.created_at) - new Date(b.created_at);
+      const sortDeep = (list) => { list.sort(byDate); list.forEach((n) => sortDeep(n.children)); };
+      sortDeep(roots);
+      roots.reverse();          // hilos más recientes primero; respuestas en orden cronológico
+      return roots;
+    }
+
+    const countReplies = (n) => n.children.reduce((total, c) => total + 1 + countReplies(c), 0);
+
+    async function load() {
+      $('#threads').innerHTML = '<p class="text-muted">Cargando hilos…</p>';
+      const { data, error } = await db.from(TABLE).select('*').order('created_at', { ascending: true });
+      if (error) {
+        console.error('Error al cargar preguntas:', error);
+        $('#threads').innerHTML = `
+          <div role="alert" class="rounded-2xl border border-red-200 bg-red-50 px-5 py-4">
+            <p class="font-semibold text-red-800">No se pudieron cargar los hilos</p>
+            <p class="mt-1 text-sm text-red-800/90">Revisa tu conexión y que la tabla <code>${TABLE}</code> tenga una política de lectura (RLS) para la clave anon.</p>
+            <button type="button" data-action="reload" class="mt-3 rounded-lg bg-red-800 px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-red-900">Reintentar</button>
+          </div>`;
+        return;
+      }
+      state.rows = data;
+      render();
+    }
+
+    async function insertRow(payload) {
+      const { data, error } = await db
+        .from(TABLE)
+        .insert([{ ...payload, autor_rol: state.rol }])
+        .select()
+        .single();
+      if (error) {
+        console.error('Error al guardar:', error);
+        toast('No se pudo guardar el mensaje. Revisa tu conexión e inténtalo de nuevo.', 'error');
+        return null;
+      }
+      state.rows.push(data);
+      return data;
+    }
+
+    /* ───────────── Render ───────────── */
+    function roleBadge(rol) {
+      const ag = rol === 'agencia';
+      return `<span class="inline-flex items-center gap-1.5 text-sm font-semibold ${ag ? 'text-graphite' : 'text-cobalt-dark'}">
+        <span class="h-2 w-2 rounded-full ${ag ? 'bg-graphite' : 'bg-cobalt'}" aria-hidden="true"></span>${rolLabel(rol)}</span>`;
+    }
+
+    const bubbleTone = (rol) => (rol === 'agencia'
+      ? 'bg-agencia-bg border-agencia-line'
+      : 'bg-cliente-bg border-cliente-line');
+
+    const timeTag = (iso) =>
+      `<time datetime="${esc(iso)}" title="${esc(fullDate(iso))}" class="text-sm text-muted">${esc(timeAgo(iso))}</time>`;
+
+    function replyButton(n, extra = '') {
+      const open = state.open.has(n.id);
+      return `<div class="mt-3 flex items-center gap-4">
+        <button type="button" data-action="toggle-reply" data-id="${n.id}" aria-expanded="${open}"
+                class="rounded text-sm font-medium text-cobalt-dark hover:underline">Responder</button>${extra}
+      </div>`;
+    }
+
+    function replyBox(n) {
+      if (!state.open.has(n.id)) return '';
+      const draft = state.drafts.get(n.id) || '';
+      return `<form class="reply-form mt-3 ${state.justOpened === n.id ? 'pop' : ''}" data-parent-id="${n.id}">
+        <label for="reply-${n.id}" class="sr-only">Tu respuesta</label>
+        <textarea id="reply-${n.id}" name="texto" rows="2" required placeholder="Escribe tu respuesta"
+                  class="w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-[0.95rem] placeholder:text-muted/70 focus:border-cobalt focus:outline-none focus:ring-2 focus:ring-cobalt/25">${esc(draft)}</textarea>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <button type="submit" class="rounded-lg bg-cobalt px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-cobalt-dark disabled:opacity-60">Enviar respuesta</button>
+          <button type="button" data-action="cancel-reply" data-id="${n.id}" class="rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:text-ink">Cancelar</button>
+          <span class="text-sm text-muted sm:ml-auto">Respondes como ${rolLabel(state.rol).toLowerCase()}</span>
+        </div>
+      </form>`;
+    }
+
+    function renderChildren(children, depth) {
+      if (!children.length) return '';
+      const indent = depth <= MAX_INDENT ? 'rail ml-3 pl-5 sm:ml-6' : '';
+      return `<ul class="mt-3 space-y-3 ${indent}">${children.map((c) => renderReply(c, depth)).join('')}</ul>`;
+    }
+
+    function renderReply(n, depth) {
+      return `<li class="node">
+        <article class="rounded-xl border px-4 py-3 ${bubbleTone(n.autor_rol)}">
+          <header class="flex items-center justify-between gap-3">
+            ${roleBadge(n.autor_rol)}
+            ${timeTag(n.created_at)}
+          </header>
+          <p class="mt-1.5 whitespace-pre-wrap break-words text-[0.95rem] leading-relaxed">${esc(n.texto)}</p>
+          ${replyButton(n)}
+          ${replyBox(n)}
+        </article>
+        ${renderChildren(n.children, depth + 1)}
+      </li>`;
+    }
+
+    function renderThread(root) {
+      const total = countReplies(root);
+      const counter = `<span class="text-sm text-muted">${total
+        ? `${total} ${total === 1 ? 'respuesta' : 'respuestas'}`
+        : 'Sin respuestas todavía'}</span>`;
+
+      return `<section aria-label="Hilo de ${esc(root.seccion || 'sin sección')}">
+        <article class="rounded-2xl border p-5 sm:p-6 ${bubbleTone(root.autor_rol)}">
+          <header class="flex flex-wrap items-center gap-x-3 gap-y-2">
+            ${roleBadge(root.autor_rol)}
+            <span class="rounded-full border border-black/10 bg-white/70 px-2.5 py-0.5 text-sm">${esc(root.seccion || 'Sin sección')}</span>
+            <span class="ml-auto">${timeTag(root.created_at)}</span>
+          </header>
+          <p class="mt-3 whitespace-pre-wrap break-words font-display text-xl leading-snug sm:text-2xl">${esc(root.texto)}</p>
+          ${replyButton(root, counter)}
+          ${replyBox(root)}
+        </article>
+        ${renderChildren(root.children, 1)}
+      </section>`;
+    }
+
+    function render() {
+      const roots = buildTree(state.rows);
+      const list = $('#threads');
+
+      list.innerHTML = roots.length
+        ? roots.map(renderThread).join('')
+        : `<div class="rounded-2xl border border-dashed border-line bg-white px-6 py-10">
+             <p class="font-display text-lg font-semibold">Aún no hay preguntas</p>
+             <p class="mt-1 text-muted">Escribe la primera arriba para abrir un hilo.</p>
+           </div>`;
+
+      $('#count').textContent = roots.length === 1 ? '1 hilo' : `${roots.length} hilos`;
+
+      const sections = new Set([...DEFAULT_SECTIONS, ...state.rows.map((r) => r.seccion).filter(Boolean)]);
+      $('#secciones').innerHTML = [...sections].map((s) => `<option value="${esc(s)}"></option>`).join('');
+    }
+
+    /* ───────────── Rol con el que se escribe ───────────── */
+    function syncRolUI() {
+      document.querySelectorAll('[data-action="set-rol"]').forEach((btn) => {
+        const active = btn.dataset.rol === state.rol;
+        btn.setAttribute('aria-pressed', String(active));
+        btn.className = 'rounded-full px-4 py-1.5 text-sm font-medium ' +
+          (active ? 'bg-ink text-white' : 'text-muted hover:text-ink');
+      });
+      $('#rol-hint').textContent = `Se publicará como ${rolLabel(state.rol).toLowerCase()}.`;
+    }
+
+    function setRol(rol) {
+      if (rol !== 'cliente' && rol !== 'agencia') return;
+      state.rol = rol;
+      try { localStorage.setItem(ROL_KEY, rol); } catch { /* almacenamiento no disponible */ }
+      syncRolUI();
+      render();
+    }
+
+    /* ───────────── Acciones ───────────── */
+    function toggleReply(id) {
+      if (state.open.has(id)) state.open.delete(id);
+      else { state.open.add(id); state.justOpened = id; }
+      render();
+      state.justOpened = null;
+      if (state.open.has(id)) {
+        const ta = document.getElementById(`reply-${id}`);
+        if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+      }
+    }
+
+    async function submitRoot(form) {
+      const seccion = form.seccion.value.trim();
+      const texto = form.texto.value.trim();
+      if (!seccion || !texto) return;
+
+      const btn = form.querySelector('button[type="submit"]');
+      setBusy(btn, true, 'Publicando…');
+      const row = await insertRow({ texto, seccion, parent_id: null });
+      setBusy(btn, false);
+
+      if (row) {
+        form.texto.value = '';
+        render();
+        toast('Pregunta publicada.');
+      }
+    }
+
+    async function submitReply(form) {
+      const parentId = Number(form.dataset.parentId);
+      const texto = form.texto.value.trim();
+      if (!texto) { form.texto.focus(); return; }
+
+      const parent = state.rows.find((r) => r.id === parentId);
+      const btn = form.querySelector('button[type="submit"]');
+      setBusy(btn, true, 'Enviando…');
+      const row = await insertRow({ texto, parent_id: parentId, seccion: parent ? parent.seccion : null });
+
+      if (row) {
+        state.open.delete(parentId);
+        state.drafts.delete(parentId);
+        render();
+        toast('Respuesta enviada.');
+      } else {
+        setBusy(btn, false);
+      }
+    }
+
+    /* ───────────── Eventos (delegación) ───────────── */
+    document.addEventListener('click', (e) => {
+      const el = e.target.closest('[data-action]');
+      if (!el) return;
+      const id = Number(el.dataset.id);
+
+      switch (el.dataset.action) {
+        case 'toggle-reply': toggleReply(id); break;
+        case 'cancel-reply': state.open.delete(id); state.drafts.delete(id); render(); break;
+        case 'set-rol': setRol(el.dataset.rol); break;
+        case 'reload': load(); break;
+      }
+    });
+
+    document.addEventListener('submit', (e) => {
+      const form = e.target;
+      if (form.id === 'new-question') { e.preventDefault(); submitRoot(form); }
+      else if (form.classList.contains('reply-form')) { e.preventDefault(); submitReply(form); }
+    });
+
+    // Guarda el borrador para no perderlo al volver a pintar la lista
+    document.addEventListener('input', (e) => {
+      if (e.target.matches('.reply-form textarea')) {
+        const id = Number(e.target.closest('form').dataset.parentId);
+        state.drafts.set(id, e.target.value);
+      }
+    });
+
+    // Ctrl/Cmd + Enter envía el formulario desde cualquier textarea
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.tagName === 'TEXTAREA' && e.target.form) {
+        e.preventDefault();
+        e.target.form.requestSubmit();
+      }
+    });
+
+    /* ───────────── Inicio ───────────── */
+    try {
+      const saved = localStorage.getItem(ROL_KEY);
+      if (saved === 'cliente' || saved === 'agencia') state.rol = saved;
+    } catch { /* almacenamiento no disponible */ }
+
+    syncRolUI();
+    load();
+  })();
+  </script>
+</body>
+</html>
