@@ -145,12 +145,12 @@
 
     /* ─────────────────────────────────────────────────────────────
        CONEXIÓN A SUPABASE
-       Si tu index.html base ya crea el cliente, borra estas 3 líneas
-       y deja: const db = <el nombre de tu cliente>;
+       Clave pública (publishable): es segura en el frontend siempre que
+       las políticas RLS de la tabla estén bien configuradas.
        ───────────────────────────────────────────────────────────── */
-    const SUPABASE_URL = 'https://TU-PROYECTO.supabase.co';
-    const SUPABASE_KEY = 'TU_ANON_KEY';
-    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const SUPABASE_URL = 'https://rcseepwquyymuabbtiku.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_UOu2ywS7nsPWktNOli9OhA_6LPctkPR';
+    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     /* ───────────── Configuración ───────────── */
     const TABLE = 'preguntas';
