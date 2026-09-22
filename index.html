@@ -5,12 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Feedback del proyecto</title>
 
-  <!-- Tipografías: Bricolage Grotesque (títulos y preguntas) + Instrument Sans (texto) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Instrument+Sans:wght@400..700&display=swap" rel="stylesheet">
 
-  <!-- Tailwind (si tu archivo base ya lo carga, deja solo una copia) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -35,13 +33,11 @@
     };
   </script>
 
-  <!-- Supabase JS v2 (si tu archivo base ya lo carga, deja solo una copia) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
     button:focus-visible { outline: 2px solid #2F4BD8; outline-offset: 2px; }
 
-    /* Riel del hilo: un codo por cada respuesta, unido a la tarjeta de arriba */
     .rail > .node { position: relative; }
     .rail > .node::before {
       content: '';
@@ -78,7 +74,6 @@
 <body class="bg-paper font-sans text-ink antialiased">
   <div class="mx-auto max-w-3xl px-4 py-10 sm:py-14">
 
-    <!-- Encabezado -->
     <header class="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <h1 class="font-display text-4xl font-bold tracking-tight sm:text-5xl">Feedback del proyecto</h1>
@@ -96,7 +91,6 @@
       </div>
     </header>
 
-    <!-- Formulario: nueva pregunta principal -->
     <form id="new-question" class="mt-10 rounded-2xl border border-line bg-white p-5 sm:p-6">
       <h2 class="font-display text-xl font-semibold">Nueva pregunta</h2>
 
@@ -121,7 +115,6 @@
       </div>
     </form>
 
-    <!-- Hilos -->
     <div class="mt-12 flex items-baseline justify-between">
       <div class="flex items-baseline gap-3">
         <h2 class="font-display text-2xl font-semibold">Conversaciones</h2>
@@ -135,7 +128,6 @@
     </div>
   </div>
 
-  <!-- Aviso de estado -->
   <div id="toast" role="status" aria-live="polite"
        class="pointer-events-none fixed bottom-4 left-1/2 max-w-[90vw] -translate-x-1/2 rounded-lg bg-ink px-4 py-2.5 text-sm text-white opacity-0 transition-opacity"></div>
 
@@ -143,31 +135,25 @@
   (() => {
     'use strict';
 
-    /* ─────────────────────────────────────────────────────────────
-       CONEXIÓN A SUPABASE
-       Clave pública (publishable): es segura en el frontend siempre que
-       las políticas RLS de la tabla estén bien configuradas.
-       ───────────────────────────────────────────────────────────── */
     const SUPABASE_URL = 'https://rcseepwquyymuabbtiku.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_UOu2ywS7nsPWktNOli9OhA_6LPctkPR';
     const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    /* ───────────── Configuración ───────────── */
     const TABLE = 'preguntas';
-    const MAX_INDENT = 3;                       // niveles con sangría; los más profundos se aplanan
+    const MAX_INDENT = 3;
     const DEFAULT_SECTIONS = ['Diseño', 'Desarrollo'];
     const ROL_KEY = 'feedback_rol';
 
-    /* ───────────── Estado ───────────── */
     const state = {
       rows: [],
       rol: 'cliente',
-      open: new Set(),        // ids con el formulario de respuesta abierto
-      drafts: new Map(),      // id → borrador de respuesta
+      open: new Set(),
+      drafts: new Map(),
+      editing: new Set(),
+      editDrafts: new Map(),
       justOpened: null
     };
 
-    /* ───────────── Utilidades ───────────── */
     const $ = (sel, root = document) => root.querySelector(sel);
 
     const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
@@ -213,8 +199,6 @@
       }
     }
 
-    /* ───────────── Datos ───────────── */
-    // Convierte la lista plana en un árbol: raíces (parent_id null) → respuestas → respuestas…
     function buildTree(rows) {
       const nodes = new Map(rows.map((r) => [r.id, { ...r, children: [] }]));
       const roots = [];
@@ -226,7 +210,7 @@
       const byDate = (a, b) => new Date(a.created_at) - new Date(b.created_at);
       const sortDeep = (list) => { list.sort(byDate); list.forEach((n) => sortDeep(n.children)); };
       sortDeep(roots);
-      roots.reverse();          // hilos más recientes primero; respuestas en orden cronológico
+      roots.reverse();
       return roots;
     }
 
@@ -264,7 +248,18 @@
       return data;
     }
 
-    /* ───────────── Render ───────────── */
+    async function deleteRow(id) {
+      if (!confirm('¿Estás seguro de eliminar este mensaje?')) return;
+      const { error } = await db.from(TABLE).delete().eq('id', id);
+      if (error) {
+        console.error('Error al eliminar:', error);
+        toast('Error al eliminar el mensaje.', 'error');
+        return;
+      }
+      await load();
+      toast('Mensaje eliminado.');
+    }
+
     function roleBadge(rol) {
       const ag = rol === 'agencia';
       return `<span class="inline-flex items-center gap-1.5 text-sm font-semibold ${ag ? 'text-graphite' : 'text-cobalt-dark'}">
@@ -278,12 +273,36 @@
     const timeTag = (iso) =>
       `<time datetime="${esc(iso)}" title="${esc(fullDate(iso))}" class="text-sm text-muted">${esc(timeAgo(iso))}</time>`;
 
-    function replyButton(n, extra = '') {
+    function actionButtons(n, extra = '') {
       const open = state.open.has(n.id);
-      return `<div class="mt-3 flex items-center gap-4">
+      const isOwner = n.autor_rol === state.rol;
+      
+      let html = `<div class="mt-3 flex flex-wrap items-center gap-4">
         <button type="button" data-action="toggle-reply" data-id="${n.id}" aria-expanded="${open}"
-                class="rounded text-sm font-medium text-cobalt-dark hover:underline">Responder</button>${extra}
-      </div>`;
+                class="rounded text-sm font-medium text-cobalt-dark hover:underline">Responder</button>`;
+      
+      if (isOwner) {
+        html += `
+        <button type="button" data-action="toggle-edit" data-id="${n.id}" class="rounded text-sm font-medium text-muted hover:text-ink">Editar</button>
+        <button type="button" data-action="delete" data-id="${n.id}" class="rounded text-sm font-medium text-red-600 hover:text-red-800">Eliminar</button>`;
+      }
+      
+      html += extra + `</div>`;
+      return html;
+    }
+
+    function renderTextContent(n, textClass) {
+      if (state.editing.has(n.id)) {
+        const draft = state.editDrafts.get(n.id) || '';
+        return `<form class="edit-form mt-2" data-id="${n.id}">
+          <textarea name="texto" rows="2" required class="w-full rounded-lg border border-line bg-white px-3 py-2 text-[0.95rem] placeholder:text-muted/70 focus:border-cobalt focus:outline-none focus:ring-2 focus:ring-cobalt/25">${esc(draft)}</textarea>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <button type="submit" class="rounded-lg bg-cobalt px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-cobalt-dark">Guardar cambios</button>
+            <button type="button" data-action="cancel-edit" data-id="${n.id}" class="rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:text-ink">Cancelar</button>
+          </div>
+        </form>`;
+      }
+      return `<p class="${textClass}">${esc(n.texto)}</p>`;
     }
 
     function replyBox(n) {
@@ -314,8 +333,8 @@
             ${roleBadge(n.autor_rol)}
             ${timeTag(n.created_at)}
           </header>
-          <p class="mt-1.5 whitespace-pre-wrap break-words text-[0.95rem] leading-relaxed">${esc(n.texto)}</p>
-          ${replyButton(n)}
+          ${renderTextContent(n, 'mt-1.5 whitespace-pre-wrap break-words text-[0.95rem] leading-relaxed')}
+          ${actionButtons(n)}
           ${replyBox(n)}
         </article>
         ${renderChildren(n.children, depth + 1)}
@@ -324,8 +343,8 @@
 
     function renderThread(root) {
       const total = countReplies(root);
-      const counter = `<span class="text-sm text-muted">${total
-        ? `${total} ${total === 1 ? 'respuesta' : 'respuestas'}`
+      const counter = `<span class="text-sm text-muted ml-auto sm:ml-0">${total
+        ? `${total}${total === 1 ? 'respuesta' : 'respuestas'}`
         : 'Sin respuestas todavía'}</span>`;
 
       return `<section aria-label="Hilo de ${esc(root.seccion || 'sin sección')}">
@@ -335,8 +354,8 @@
             <span class="rounded-full border border-black/10 bg-white/70 px-2.5 py-0.5 text-sm">${esc(root.seccion || 'Sin sección')}</span>
             <span class="ml-auto">${timeTag(root.created_at)}</span>
           </header>
-          <p class="mt-3 whitespace-pre-wrap break-words font-display text-xl leading-snug sm:text-2xl">${esc(root.texto)}</p>
-          ${replyButton(root, counter)}
+          ${renderTextContent(root, 'mt-3 whitespace-pre-wrap break-words font-display text-xl leading-snug sm:text-2xl')}
+          ${actionButtons(root, counter)}
           ${replyBox(root)}
         </article>
         ${renderChildren(root.children, 1)}
@@ -360,7 +379,6 @@
       $('#secciones').innerHTML = [...sections].map((s) => `<option value="${esc(s)}"></option>`).join('');
     }
 
-    /* ───────────── Rol con el que se escribe ───────────── */
     function syncRolUI() {
       document.querySelectorAll('[data-action="set-rol"]').forEach((btn) => {
         const active = btn.dataset.rol === state.rol;
@@ -374,12 +392,11 @@
     function setRol(rol) {
       if (rol !== 'cliente' && rol !== 'agencia') return;
       state.rol = rol;
-      try { localStorage.setItem(ROL_KEY, rol); } catch { /* almacenamiento no disponible */ }
+      try { localStorage.setItem(ROL_KEY, rol); } catch { }
       syncRolUI();
       render();
     }
 
-    /* ───────────── Acciones ───────────── */
     function toggleReply(id) {
       if (state.open.has(id)) state.open.delete(id);
       else { state.open.add(id); state.justOpened = id; }
@@ -389,6 +406,18 @@
         const ta = document.getElementById(`reply-${id}`);
         if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
       }
+    }
+
+    function toggleEdit(id) {
+      if (state.editing.has(id)) {
+        state.editing.delete(id);
+        state.editDrafts.delete(id);
+      } else {
+        state.editing.add(id);
+        const row = state.rows.find(r => r.id === id);
+        if (row) state.editDrafts.set(id, row.texto);
+      }
+      render();
     }
 
     async function submitRoot(form) {
@@ -413,9 +442,9 @@
       const texto = form.texto.value.trim();
       if (!texto) { form.texto.focus(); return; }
 
-      const parent = state.rows.find((r) => r.id === parentId);
       const btn = form.querySelector('button[type="submit"]');
       setBusy(btn, true, 'Enviando…');
+      const parent = state.rows.find((r) => r.id === parentId);
       const row = await insertRow({ texto, parent_id: parentId, seccion: parent ? parent.seccion : null });
 
       if (row) {
@@ -428,7 +457,30 @@
       }
     }
 
-    /* ───────────── Eventos (delegación) ───────────── */
+    async function submitEdit(form) {
+      const id = Number(form.dataset.id);
+      const texto = form.texto.value.trim();
+      if (!texto) return;
+
+      const btn = form.querySelector('button[type="submit"]');
+      setBusy(btn, true, 'Guardando…');
+
+      const { error } = await db.from(TABLE).update({ texto }).eq('id', id);
+      if (error) {
+        setBusy(btn, false);
+        toast('Error al editar.', 'error');
+        return;
+      }
+
+      const row = state.rows.find(r => r.id === id);
+      if (row) row.texto = texto;
+
+      state.editing.delete(id);
+      state.editDrafts.delete(id);
+      render();
+      toast('Mensaje actualizado.');
+    }
+
     document.addEventListener('click', (e) => {
       const el = e.target.closest('[data-action]');
       if (!el) return;
@@ -437,6 +489,9 @@
       switch (el.dataset.action) {
         case 'toggle-reply': toggleReply(id); break;
         case 'cancel-reply': state.open.delete(id); state.drafts.delete(id); render(); break;
+        case 'toggle-edit': toggleEdit(id); break;
+        case 'cancel-edit': state.editing.delete(id); state.editDrafts.delete(id); render(); break;
+        case 'delete': deleteRow(id); break;
         case 'set-rol': setRol(el.dataset.rol); break;
         case 'reload': load(); break;
       }
@@ -446,17 +501,19 @@
       const form = e.target;
       if (form.id === 'new-question') { e.preventDefault(); submitRoot(form); }
       else if (form.classList.contains('reply-form')) { e.preventDefault(); submitReply(form); }
+      else if (form.classList.contains('edit-form')) { e.preventDefault(); submitEdit(form); }
     });
 
-    // Guarda el borrador para no perderlo al volver a pintar la lista
     document.addEventListener('input', (e) => {
       if (e.target.matches('.reply-form textarea')) {
         const id = Number(e.target.closest('form').dataset.parentId);
         state.drafts.set(id, e.target.value);
+      } else if (e.target.matches('.edit-form textarea')) {
+        const id = Number(e.target.closest('form').dataset.id);
+        state.editDrafts.set(id, e.target.value);
       }
     });
 
-    // Ctrl/Cmd + Enter envía el formulario desde cualquier textarea
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.tagName === 'TEXTAREA' && e.target.form) {
         e.preventDefault();
@@ -464,11 +521,10 @@
       }
     });
 
-    /* ───────────── Inicio ───────────── */
     try {
       const saved = localStorage.getItem(ROL_KEY);
       if (saved === 'cliente' || saved === 'agencia') state.rol = saved;
-    } catch { /* almacenamiento no disponible */ }
+    } catch { }
 
     syncRolUI();
     load();
